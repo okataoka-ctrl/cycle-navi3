@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#123d36"><meta name="description" content="GPXコースをスマホでたどる、自転車用PWAナビ"><link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./icons/icon-192.png"><link rel="apple-touch-icon" href="./icons/icon-192.png"><link rel="stylesheet" href="./style.css"><title>Cycle Navi — コースと、走ろう。</title></head>
+<body>
+<header><div class="brand"><span class="brand-icon">↗</span><div>Cycle Navi<small>コースと、走ろう。</small></div></div><button id="help" class="quiet" aria-label="使い方と制約">使い方</button></header>
+<main>
+<section class="ride-head"><div><span class="eyebrow">YOUR NEXT RIDE</span><h1 id="route-name">走りたいコースを、ここに。</h1><p id="route-meta">GPXを読み込むと、コース追従を始められます。</p></div><span class="pill" id="network">オンライン</span></section>
+<section class="navigator" aria-label="ナビゲーション">
+<div class="instruction"><span id="turn-icon" aria-hidden="true">↗</span><div><strong id="instruction">コースを準備しましょう</strong><small id="sub-instruction">位置情報は「ナビ開始」時に使用します</small></div><span class="nav-badge" id="mode">準備</span></div>
+<div id="map" role="img" aria-label="コース地図。ドラッグで移動、ボタンで拡大縮小"><div id="tiles"></div><canvas id="overlay"></canvas><div class="map-label" id="map-label">コース未設定</div><div class="map-controls"><button id="zoom-in" aria-label="地図を拡大">＋</button><button id="zoom-out" aria-label="地図を縮小">−</button><button id="fit" aria-label="コース全体">⤢</button><button id="follow" aria-label="現在地を追従">◎</button></div><div class="attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div></div>
+<div class="metrics"><div><span>速度 <small>km/h</small></span><strong id="speed">—</strong></div><div><span>残り <small>km</small></span><strong id="remaining">—</strong></div><div><span>走行距離 <small>km</small></span><strong id="ridden">0.0</strong></div></div>
+<div class="ride-actions"><button id="start" class="primary">▶ ナビ開始</button><button id="pause" disabled>一時停止</button><button id="stop" disabled>終了</button></div>
+</section>
+<section class="tools"><label class="file-button" for="gpx">＋ GPXを読み込む<input id="gpx" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml"></label><button id="demo">サンプルを見る</button><button id="export">記録を書き出す</button></section>
+<section class="options"><label><input type="checkbox" id="voice">音声でコース形状を通知</label><label><input type="checkbox" id="wake" checked>画面を点灯したまま使う</label><button id="install" hidden>ホーム画面に追加</button></section>
+<p class="notice">初期版：GPX追従用です。道路経路の探索・自動リルートは未対応。曲がりの通知はコース形状の推定で、交差点の指示ではありません。</p>
+<div id="status" role="status" aria-live="polite">コースと記録はこのブラウザ内に保存します。</div>
+<footer><span>Cycle Navi / 0.1</span><button id="delete" class="quiet">保存データを削除</button></footer>
+</main>
+<dialog id="help-dialog"><h2>走り出す前に</h2><p>① GPXを読み込む → ② コースを確認 → ③ 停止した状態で「ナビ開始」。位置情報の利用を許可してください。</p><p>サンプルは操作確認用の架空コースです。走行可能な道として検証していません。</p><p>画面ロック・アプリ切替中はGPS、記録、音声が止まる場合があります。画面を表示したまま使用してください。GPSが途切れた区間の走行距離は補完しません。</p><p>オフラインではアプリと保存済みコース・記録を利用できます。背景地図の保存・オフライン表示は対応していません。経路探索、施設検索、自動リルートも未対応です。</p><p>地図の配信元には表示範囲とIPアドレス等が送られます。GPX・走行記録のアップロードや解析用の送信は行いません。ブラウザのデータ消去で保存内容が失われるため、記録を書き出してください。</p><p>iPhone：Safariの共有 → ホーム画面に追加。Android：ブラウザのメニュー → アプリをインストール。HTTPS環境で開いてください。</p><button id="close-help" class="primary">わかりました</button></dialog>
+<script type="module" src="./app.js"></script></body></html>
