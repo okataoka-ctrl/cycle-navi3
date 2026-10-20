@@ -18,11 +18,19 @@
 <div class="metrics"><div><span>速度 <small>km/h</small></span><strong id="speed">—</strong></div><div><span>残り <small>km</small></span><strong id="remaining">—</strong></div><div><span>走行距離 <small>km</small></span><strong id="ridden">0.0</strong></div></div>
 <div class="ride-actions"><button id="start" class="primary">▶ ナビ開始</button><button id="pause" disabled>一時停止</button><button id="stop" disabled>終了</button></div>
 </section>
+<section class="panel terrain-panel" aria-label="標高と坂道"><div class="section-title"><div><span class="eyebrow">ELEVATION & CLIMBS</span><h2>コースの勾配・登り坂</h2></div><button id="refresh-elevation">標高を取得</button></div>
+<div class="terrain-stats"><div>獲得標高（概算）<strong id="ascent">—</strong></div><div>下降量（概算）<strong id="descent">—</strong></div><div>最大上り勾配（推定）<strong id="max-grade">—</strong></div></div>
+<p class="current-grade">現在付近の勾配：<strong id="terrain-now">ナビ開始後に表示</strong></p>
+<svg id="elevation-chart" viewBox="0 0 800 220" role="img" aria-label="横軸は出発地点からの距離、縦軸は標高。勾配ごとに色分けした標高グラフ"></svg>
+<label class="terrain-slider">確認する地点 <input id="terrain-position" type="range" min="0" max="100" value="0" step="1" disabled></label><p id="terrain-detail" class="panel-note" role="status">コース作成後に標高を取得すると、坂の位置を確認できます。</p>
+<div class="grade-legend"><span style="--band:#4485c6">下り −2%以下</span><span style="--band:#279278">平坦</span><span style="--band:#a4b844">上り 2〜5%</span><span style="--band:#db9337">5〜8%</span><span style="--band:#ce5b4e">8%以上</span></div>
+<div id="climb-list" class="climb-list"></div><p id="elevation-status" class="panel-note" role="status">標高を取得すると、地図とグラフを勾配で色分けします。</p>
+<p class="service-note">登り坂：平滑化後の勾配2%以上・距離300m以上・標高差15m以上の区間。標高は地形の概算で、橋・トンネル・短い急坂は実際と異なる場合があります。<br>Elevation: <a href="https://open-meteo.com/en/docs/elevation-api" target="_blank" rel="noopener">Open-Meteo</a> / <a href="https://doi.org/10.5270/ESA-c5d3d65" target="_blank" rel="noopener">Copernicus DEM GLO-90</a>（約90mメッシュ）。GPXに標高がある場合はその値を優先。</p></section>
 <section class="tools"><label class="file-button" for="gpx">＋ GPXを読み込む<input id="gpx" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml"></label><button id="demo">サンプルを見る</button><button id="export">記録を書き出す</button></section>
 <section class="options"><label><input type="checkbox" id="voice">音声でコース形状を通知</label><label><input type="checkbox" id="wake" checked>画面を点灯したまま使う</label><button id="install" hidden>ホーム画面に追加</button></section>
 <p class="notice">自転車経路の探索・GPX追従に対応。自動リルートは未対応。曲がりの通知はコース形状の推定で、交差点の指示ではありません。</p>
 <div id="status" role="status" aria-live="polite">コースと記録はこのブラウザ内に保存します。</div>
-<footer><span>Cycle Navi / 0.2</span><button id="delete" class="quiet">保存データを削除</button></footer>
+<footer><span>Cycle Navi / 0.3</span><button id="delete" class="quiet">保存データを削除</button></footer>
 </main>
-<dialog id="help-dialog"><h2>走り出す前に</h2><p>① 地点を検索して経路作成、またはGPX取込 → ② コースを確認 → ③ 停止した状態で「ナビ開始」。位置情報の利用を許可してください。</p><p>サンプルは操作確認用の架空コースです。走行可能な道として検証していません。</p><p>画面ロック・アプリ切替中はGPS、記録、音声が止まる場合があります。画面を表示したまま使用してください。GPSが途切れた区間の走行距離は補完しません。</p><p>オフラインではアプリと保存済みコース・記録を利用できます。背景地図の保存・オフライン表示は対応していません。地点検索・経路探索・天気の更新には通信が必要です。自動リルートは未対応です。</p><p>地図の配信元には表示範囲とIPアドレス等が送られます。検索語はPhoton、経路作成時の地点座標はFOSSGIS、天気を取得する地点の座標はOpen-Meteoへ送信します。走行軌跡のアップロードやアクセス解析は行いません。ブラウザのデータ消去で保存内容が失われるため、記録を書き出してください。</p><p>iPhone：Safariの共有 → ホーム画面に追加。Android：ブラウザのメニュー → アプリをインストール。HTTPS環境で開いてください。</p><button id="close-help" class="primary">わかりました</button></dialog>
+<dialog id="help-dialog"><h2>走り出す前に</h2><p>① 地点を検索して経路作成、またはGPX取込 → ② コースを確認 → ③ 停止した状態で「ナビ開始」。位置情報の利用を許可してください。</p><p>サンプルは操作確認用の架空コースです。走行可能な道として検証していません。</p><p>画面ロック・アプリ切替中はGPS、記録、音声が止まる場合があります。画面を表示したまま使用してください。GPSが途切れた区間の走行距離は補完しません。</p><p>オフラインではアプリと保存済みコース・記録を利用できます。背景地図の保存・オフライン表示は対応していません。地点検索・経路探索・天気の更新には通信が必要です。自動リルートは未対応です。</p><p>地図の配信元には表示範囲とIPアドレス等が送られます。検索語はPhoton、経路作成時の地点座標はFOSSGIS、天気を取得する地点と標高を解析するコース上の座標はOpen-Meteoへ送信します。走行軌跡のアップロードやアクセス解析は行いません。ブラウザのデータ消去で保存内容が失われるため、記録を書き出してください。</p><p>iPhone：Safariの共有 → ホーム画面に追加。Android：ブラウザのメニュー → アプリをインストール。HTTPS環境で開いてください。</p><button id="close-help" class="primary">わかりました</button></dialog>
 <script type="module" src="./app.js"></script></body></html>
