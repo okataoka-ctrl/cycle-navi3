@@ -3,7 +3,15 @@
 <body>
 <header><div class="brand"><span class="brand-icon">↗</span><div>Cycle Navi<small>コースと、走ろう。</small></div></div><button id="help" class="quiet" aria-label="使い方と制約">使い方</button></header>
 <main>
-<section class="ride-head"><div><span class="eyebrow">YOUR NEXT RIDE</span><h1 id="route-name">走りたいコースを、ここに。</h1><p id="route-meta">GPXを読み込むと、コース追従を始められます。</p></div><span class="pill" id="network">オンライン</span></section>
+<section class="ride-head"><div><span class="eyebrow">YOUR NEXT RIDE</span><h1 id="route-name">走りたいコースを、ここに。</h1><p id="route-meta">地点検索またはGPX取込で、コースを作成できます。</p></div><span class="pill" id="network">オンライン</span></section>
+<section class="planner panel" aria-label="地点を検索してコース作成">
+<div class="section-title"><div><span class="eyebrow">PLAN YOUR ROUTE</span><h2>出発地と、立ち寄り先を決める</h2></div><button id="swap-points" class="quiet">順序を反転</button></div>
+<div id="point-list"></div><div class="plan-actions"><button id="add-via">＋ 中継地点</button><button id="build-route" class="primary">自転車ルートを作成</button></div>
+<p id="plan-message" class="panel-note" role="status">各地点を検索結果から選択してください。中継は最大5か所、表示順に通過します。</p>
+<p class="service-note">検索：Photon / OpenStreetMap · 経路：FOSSGIS / OSRM · <a href="https://www.openstreetmap.org/fixthemap" target="_blank" rel="noopener">地図の問題を報告</a></p>
+</section>
+<section class="weather panel" aria-label="天気と風"><div class="section-title"><div><span class="eyebrow">WEATHER & WIND</span><h2>コースの天気・風</h2></div><button id="refresh-weather">天気を取得</button></div>
+<label class="forecast-select">表示時刻 <select id="weather-time"><option value="current">現在（モデル推定）</option></select></label><div id="weather-cards" class="weather-cards"></div><p id="weather-status" class="panel-note" role="status">設定した各地点の気温・風向・風速・突風を表示します。</p><p class="service-note">Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a> · 時刻は日本時間。観測実況・警報ではありません。</p></section>
 <section class="navigator" aria-label="ナビゲーション">
 <div class="instruction"><span id="turn-icon" aria-hidden="true">↗</span><div><strong id="instruction">コースを準備しましょう</strong><small id="sub-instruction">位置情報は「ナビ開始」時に使用します</small></div><span class="nav-badge" id="mode">準備</span></div>
 <div id="map" role="img" aria-label="コース地図。ドラッグで移動、ボタンで拡大縮小"><div id="tiles"></div><canvas id="overlay"></canvas><div class="map-label" id="map-label">コース未設定</div><div class="map-controls"><button id="zoom-in" aria-label="地図を拡大">＋</button><button id="zoom-out" aria-label="地図を縮小">−</button><button id="fit" aria-label="コース全体">⤢</button><button id="follow" aria-label="現在地を追従">◎</button></div><div class="attribution">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors</div></div>
@@ -12,9 +20,9 @@
 </section>
 <section class="tools"><label class="file-button" for="gpx">＋ GPXを読み込む<input id="gpx" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml"></label><button id="demo">サンプルを見る</button><button id="export">記録を書き出す</button></section>
 <section class="options"><label><input type="checkbox" id="voice">音声でコース形状を通知</label><label><input type="checkbox" id="wake" checked>画面を点灯したまま使う</label><button id="install" hidden>ホーム画面に追加</button></section>
-<p class="notice">初期版：GPX追従用です。道路経路の探索・自動リルートは未対応。曲がりの通知はコース形状の推定で、交差点の指示ではありません。</p>
+<p class="notice">自転車経路の探索・GPX追従に対応。自動リルートは未対応。曲がりの通知はコース形状の推定で、交差点の指示ではありません。</p>
 <div id="status" role="status" aria-live="polite">コースと記録はこのブラウザ内に保存します。</div>
-<footer><span>Cycle Navi / 0.1</span><button id="delete" class="quiet">保存データを削除</button></footer>
+<footer><span>Cycle Navi / 0.2</span><button id="delete" class="quiet">保存データを削除</button></footer>
 </main>
-<dialog id="help-dialog"><h2>走り出す前に</h2><p>① GPXを読み込む → ② コースを確認 → ③ 停止した状態で「ナビ開始」。位置情報の利用を許可してください。</p><p>サンプルは操作確認用の架空コースです。走行可能な道として検証していません。</p><p>画面ロック・アプリ切替中はGPS、記録、音声が止まる場合があります。画面を表示したまま使用してください。GPSが途切れた区間の走行距離は補完しません。</p><p>オフラインではアプリと保存済みコース・記録を利用できます。背景地図の保存・オフライン表示は対応していません。経路探索、施設検索、自動リルートも未対応です。</p><p>地図の配信元には表示範囲とIPアドレス等が送られます。GPX・走行記録のアップロードや解析用の送信は行いません。ブラウザのデータ消去で保存内容が失われるため、記録を書き出してください。</p><p>iPhone：Safariの共有 → ホーム画面に追加。Android：ブラウザのメニュー → アプリをインストール。HTTPS環境で開いてください。</p><button id="close-help" class="primary">わかりました</button></dialog>
+<dialog id="help-dialog"><h2>走り出す前に</h2><p>① 地点を検索して経路作成、またはGPX取込 → ② コースを確認 → ③ 停止した状態で「ナビ開始」。位置情報の利用を許可してください。</p><p>サンプルは操作確認用の架空コースです。走行可能な道として検証していません。</p><p>画面ロック・アプリ切替中はGPS、記録、音声が止まる場合があります。画面を表示したまま使用してください。GPSが途切れた区間の走行距離は補完しません。</p><p>オフラインではアプリと保存済みコース・記録を利用できます。背景地図の保存・オフライン表示は対応していません。地点検索・経路探索・天気の更新には通信が必要です。自動リルートは未対応です。</p><p>地図の配信元には表示範囲とIPアドレス等が送られます。検索語はPhoton、経路作成時の地点座標はFOSSGIS、天気を取得する地点の座標はOpen-Meteoへ送信します。走行軌跡のアップロードやアクセス解析は行いません。ブラウザのデータ消去で保存内容が失われるため、記録を書き出してください。</p><p>iPhone：Safariの共有 → ホーム画面に追加。Android：ブラウザのメニュー → アプリをインストール。HTTPS環境で開いてください。</p><button id="close-help" class="primary">わかりました</button></dialog>
 <script type="module" src="./app.js"></script></body></html>

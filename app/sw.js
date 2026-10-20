@@ -1,7 +1,8 @@
-const CACHE='cycle-navi-shell-v1';
-const ASSETS=['./','./index.html','./style.css','./app.js','./nav.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png'];
+const PREFIX='cycle-navi:'+self.registration.scope+':';
+const CACHE=PREFIX+'v2';
+const ASSETS=['./','./index.html','./style.css','./app.js','./nav.js','./planner.js','./services.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS))));
-self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('cycle-navi-shell-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
+self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith(PREFIX)&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   // Do not intercept map tiles or any third-party requests.
