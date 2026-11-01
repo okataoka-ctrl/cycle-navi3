@@ -30,3 +30,7 @@ test('a small descending interruption is kept inside one climb',()=>{
   const samples=Array.from({length:30},(_,i)=>({lat:35+i/10000,lon:140,s:i*100,ele:i<=15?i*5:i===16?72:72+(i-16)*5}));
   const t=analyzeTerrain(samples);assert.equal(t.climbs.length,1);assert.ok(t.climbs[0].gain>=100);
 });
+test('a short steep climb still qualifies when ascent exceeds 50m',()=>{
+  const samples=[0,100,200].map(s=>({lat:35,lon:140,s,ele:s/2}));
+  const t=analyzeTerrain(samples);assert.equal(t.climbs.length,1);assert.ok(t.climbs[0].length<300);assert.ok(t.climbs[0].gain>=50);
+});

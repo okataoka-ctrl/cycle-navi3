@@ -23,7 +23,7 @@ export function analyzeTerrain(samples){
   let ascent=0,descent=0,anchor=profile[0].ele;for(const p of profile){const d=p.ele-anchor;if(Math.abs(d)>=3){if(d>0)ascent+=d;else descent-=d;anchor=p.ele;}}
   const climbs=[];let begin=0,peak=0;
   function finish(end){const a=profile[begin],b=profile[end],length=b.s-a.s,rise=b.ele-a.ele;let gain=0,reference=a.ele;for(const q of profile.slice(begin+1,end+1)){const d=q.ele-reference;if(Math.abs(d)>=3){if(d>0)gain+=d;reference=q.ele;}}if(b.ele>reference)gain+=b.ele-reference;
-    if(length>=300&&gain>=15&&rise>0)climbs.push({start:a.s,end:b.s,length,gain,rise,average:rise/length*100,max:Math.max(...profile.slice(begin,end+1).map(p=>p.grade)),point:a});}
+    if(length>0&&rise>0&&((length>=300&&gain>=15)||gain>=50))climbs.push({start:a.s,end:b.s,length,gain,rise,average:rise/length*100,max:Math.max(...profile.slice(begin,end+1).map(p=>p.grade)),point:a});}
   for(let i=1;i<profile.length;i++){
     if(profile[i].ele>profile[peak].ele+0.2)peak=i;
     if(profile[i].ele<profile[begin].ele&&peak===begin){begin=i;peak=i;continue;}

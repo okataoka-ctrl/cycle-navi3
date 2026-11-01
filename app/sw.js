@@ -1,5 +1,5 @@
 const PREFIX='cycle-navi:'+self.registration.scope+':';
-const CACHE=PREFIX+'v4-refresh';
+const CACHE=PREFIX+'v4-final';
 const ASSETS=['./','./index.html','./style.css','./app.js','./nav.js','./planner.js','./services.js','./terrain.js','./elevation.js','./navigation.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS.map(p=>new Request(new URL(p,self.registration.scope),{cache:'reload'}))))));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith(PREFIX)&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
