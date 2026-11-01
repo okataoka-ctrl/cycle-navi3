@@ -1,19 +1,20 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {searchURL,searchResults,routeURL,routeResult,weatherURL,weatherAt,weatherLabel,windDirection,jsonRequest} from '../app/services.js';
+import {readFileSync} from 'node:fs';
+import {searchURL,searchResults,routeURL,routeResult,weatherURL,weatherAt,weatherLabel,windDirection,jsonRequest,getCurrentPoint,decodePolyline} from '../app/services.js';
 test('search encodes Japanese and special characters as a query',()=>{
   const u=new URL(searchURL('千葉駅 & 南口'));assert.equal(u.searchParams.get('q'),'千葉駅 & 南口');
   const rows=searchResults({features:[{geometry:{coordinates:[140,35]},properties:{name:'駅',city:'千葉市'}},{geometry:{coordinates:[NaN,35]}}]});assert.equal(rows.length,1);assert.equal(rows[0].lat,35);assert.equal(rows[0].lon,140);
 });
 test('cycling route preserves start, intermediate, and destination order',()=>{
   const url=routeURL([{lat:35,lon:140},{lat:35.1,lon:140.1},{lat:35.2,lon:140.2}]);
-  assert.ok(url.includes('/routed-bike/'));assert.ok(url.includes('140,35;140.1,35.1;140.2,35.2'));
+  const payload=JSON.parse(new URL(url).searchParams.get('json'));assert.deepEqual(payload.locations.map(p=>[p.lon,p.lat]),[[140,35],[140.1,35.1],[140.2,35.2]]);assert.equal(payload.costing,'bicycle');assert.equal(payload.costing_options.bicycle.use_roads,0);assert.equal(payload.costing_options.bicycle.bicycle_type,'road');const normal=JSON.parse(new URL(routeURL([{lat:35,lon:140},{lat:36,lon:141}],{preferCycleways:false})).searchParams.get('json'));assert.equal(normal.costing_options.bicycle.use_roads,0.5);
   assert.throws(()=>routeURL([{lat:35,lon:140}]));
 });
 test('route failures never return a straight-line substitute',()=>{
   assert.throws(()=>routeResult({code:'NoRoute',routes:[]}));
-  const r=routeResult({code:'Ok',routes:[{geometry:{coordinates:[[140,35],[140.1,35.1]]},distance:1200,duration:500}],waypoints:[]});
-  assert.deepEqual(r.points,[{lat:35,lon:140},{lat:35.1,lon:140.1}]);
+  const r=routeResult(JSON.parse(readFileSync(new URL('./fixtures/valhalla-route.json',import.meta.url))));
+  assert.equal(r.stopIndices.length,3);assert.ok(r.points.length>100);assert.ok(Math.abs(r.points[0].lat-35.6121)<0.001);assert.ok(Math.abs(r.points.at(-1).lon-140.13)<0.001);assert.equal(r.distance,6244);assert.throws(()=>decodePolyline('~'));
 });
 test('weather request uses meters per second, epoch timestamps, and all selected points',()=>{
   const u=new URL(weatherURL([{lat:35.123456,lon:140.23456},{lat:36,lon:141}]));
@@ -28,4 +29,11 @@ test('service HTTP failures and throttling are surfaced',async()=>{
   await assert.rejects(()=>jsonRequest('https://example.test',async()=>({ok:false,status:429})),/混み合/);
   await assert.rejects(()=>jsonRequest('https://example.test',async()=>({ok:false,status:503})),/503/);
   const r=await jsonRequest('https://example.test',async()=>({ok:true,json:async()=>({ok:true})}));assert.equal(r.ok,true);
+});
+
+test('current location resolves a fresh fixed point and handles denial or low accuracy',async()=>{
+  const geo={getCurrentPosition(success,error,options){assert.equal(options.maximumAge,0);success({coords:{latitude:35,longitude:140,accuracy:8},timestamp:100});}};
+  const p=await getCurrentPoint(geo);assert.equal(p.name,'現在地');assert.equal(p.lat,35);assert.equal(p.capturedAt,100);
+  await assert.rejects(()=>getCurrentPoint({getCurrentPosition(ok,fail){fail({code:1});}}),/許可/);
+  await assert.rejects(()=>getCurrentPoint({getCurrentPosition(ok){ok({coords:{accuracy:150}});}}),/精度/);
 });

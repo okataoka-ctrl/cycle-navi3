@@ -1,8 +1,11 @@
+import {requestRoute} from './services.js';
+import {smoothHeading,rotateOffset,movementHeading,createStops,visitStops,createRerouter,climbGuidance} from './navigation.js';
 import {mountElevation} from './elevation.js';
 import {gradeColor} from './terrain.js';
 import {mountPlanner} from './planner.js';
 import {distance,prepare,locate,bends,toGPX} from './nav.js';
 const $=id=>document.getElementById(id);
+let navigationPlan={preferCycleways:true,stops:[]},routeRevision=0,offRoute=false,heading=null,headingFix=null,headUp=true,announcedClimbs=new Set();
 let elevation=null,terrainData=null,savedTerrain=null;
 let planner=null,planMarkers=[],routeKind='gpx';
 let route=[],cues=[],track=[],routeName='',running=false,paused=false,watch=null,position=null,progress=null,offSince=null,lastSpoken=-1,rideDistance=0,wake=null,db,hasSession=false;
@@ -10,62 +13,105 @@ let view={lat:35.79,lon:140.15,z:12},following=true,tileNodes=new Map(),saveTime
 function status(s){$('status').textContent=s;}
 function instruction(a,b,icon='↗'){$('instruction').textContent=a;$('sub-instruction').textContent=b;$('turn-icon').textContent=icon;}
 function requestDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open('cycle-navi',1);r.onupgradeneeded=()=>r.result.createObjectStore('data');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
-async function restore(){try{db=await requestDB();const value=await new Promise((resolve,reject)=>{const r=db.transaction('data').objectStore('data').get('ride');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});if(value){route=value.route||[];routeName=value.routeName||'';track=value.track||[];rideDistance=value.rideDistance||0;progress=value.progress??null;hasSession=!!value.hasSession;routeKind=value.routeKind||'gpx';savedTerrain=value.terrainAnalysis||null;cues=bends(route);if(route.length){setRouteTitle();fitRoute();}updateMetrics();if(hasSession)status('前回の記録を復元しました。「ナビ開始」で再開できます。');}}catch{status('端末内の保存が利用できません。記録は必ず書き出してください。');}}
-function save(){if(!db)return;clearTimeout(saveTimer);const tx=db.transaction('data','readwrite');tx.objectStore('data').put({route,routeName,track,rideDistance,progress,hasSession,routeKind,terrainAnalysis:savedTerrain},'ride');tx.onerror=()=>status('保存に失敗しました。容量を確認し、記録を書き出してください。');}
+async function restore(){try{db=await requestDB();const value=await new Promise((resolve,reject)=>{const r=db.transaction('data').objectStore('data').get('ride');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});if(value){route=value.route||[];routeName=value.routeName||'';track=value.track||[];rideDistance=value.rideDistance||0;progress=value.progress??null;hasSession=!!value.hasSession;routeKind=value.routeKind||'gpx';savedTerrain=value.terrainAnalysis?.analysisVersion===4?value.terrainAnalysis:null;navigationPlan=value.navigationPlan||{preferCycleways:true,stops:[]};announcedClimbs=new Set(value.announcedClimbs||[]);cues=bends(route);if(route.length){setRouteTitle();fitRoute();}updateMetrics();if(hasSession)status('前回の記録を復元しました。「ナビ開始」で再開できます。');}}catch{status('端末内の保存が利用できません。記録は必ず書き出してください。');}}
+function save(){if(!db)return;clearTimeout(saveTimer);const tx=db.transaction('data','readwrite');tx.objectStore('data').put({route,routeName,track,rideDistance,progress,hasSession,routeKind,terrainAnalysis:savedTerrain,navigationPlan,announcedClimbs:[...announcedClimbs]},'ride');tx.onerror=()=>status('保存に失敗しました。容量を確認し、記録を書き出してください。');}
 function updateMetrics(){ $('remaining').textContent=route.length?(Math.max(0,route.at(-1).s-(progress||0))/1000).toFixed(1):'—';$('ridden').textContent=(rideDistance/1000).toFixed(1);}
-function setRouteTitle(){$('route-name').textContent=routeName;$('route-meta').textContent=`${(route.at(-1).s/1000).toFixed(1)} km · ${route.length.toLocaleString()}点 · 北が上`;$('map-label').textContent='予定コース ● 緑 / 走行記録 ● 青';}
-function loadRoute(points,name,kind='gpx'){if(running){status('コースを変更するにはナビを終了してください。');return false;}const prepared=prepare(points);savedTerrain=null;elevation?.reset();routeKind=kind;if(kind==='gpx')planner?.clear();hasSession=false;route=prepared;routeName=name;cues=bends(route);progress=null;offSince=null;lastSpoken=-1;setRouteTitle();fitRoute();updateMetrics();save();instruction('コースの準備ができました','実際の道路状況を確認して出発してください');if(elevation)$('refresh-elevation').click();}
+function setRouteTitle(){$('route-name').textContent=routeName;$('route-meta').textContent=`${(route.at(-1).s/1000).toFixed(1)} km · ${route.length.toLocaleString()}点 · ${navigationPlan.preferCycleways?'自転車道優先':'標準'} · ナビ中は進行方向が上`;$('map-label').textContent='予定コース ● 緑 / 走行記録 ● 青';}
+function clearTerrain(){savedTerrain=null;terrainData=null;announcedClimbs.clear();elevation?.reset();$('climb-alert').hidden=true;}
+function loadRoute(points,name,kind='gpx',config=null){
+  if(running){status('コースを変更するにはナビを終了してください。');return false;}
+  const prepared=prepare(points);
+  const plan={preferCycleways:config?.preferCycleways??planner?.preferCycleways??true,stops:config?createStops(prepared,config.points,config.stopIndices):[]};
+  rerouter.cancel();routeRevision++;$('reroute-status').textContent='';clearTerrain();routeKind=kind;navigationPlan=plan;
+  if(kind==='gpx')planner?.clear();hasSession=false;route=prepared;routeName=name;cues=bends(route);progress=null;offSince=null;offRoute=false;lastSpoken=-1;
+  setRouteTitle();fitRoute();updateMetrics();save();instruction('コースの準備ができました','実際の道路状況を確認して出発してください');
+  if(elevation)$('refresh-elevation').click();
+}
+function applyReroute(result){
+  routeRevision++;route=result.route;navigationPlan=result.plan;clearTerrain();cues=bends(route);progress=locate(position,route,null,heading).s;
+  lastSpoken=-1;offSince=null;offRoute=false;instruction('リルートしました','新しい経路に沿って進んでください');setRouteTitle();updateMetrics();save();draw();$('refresh-elevation').click();
+  speak('リルートしました。新しいコースに沿って進んでください。');
+}
+function updateClimbNotice(speed){
+  const n=terrainData&&progress!==null?climbGuidance(terrainData.climbs,progress,speed,announcedClimbs):null;
+  $('climb-alert').hidden=!n;if(!n)return;$('climb-alert').textContent='⛰ '+n.text;
+  if(n.due&&(!('speechSynthesis' in window)||!speechSynthesis.speaking)){announcedClimbs.add(n.id);speak(n.spoken);save();}
+}
 function parseGPX(text){const doc=new DOMParser().parseFromString(text,'application/xml');if(doc.querySelector('parsererror')||doc.documentElement.localName!=='gpx')throw Error('有効なGPXファイルではありません。');const all=name=>Array.from(doc.getElementsByTagNameNS('*',name));const segments=all('trkseg').filter(x=>x.getElementsByTagNameNS('*','trkpt').length>0);if(segments.length>1)throw Error('複数区間のGPXです。区間を1つに分けて読み込んでください。');let nodes=all('trkpt');if(!nodes.length)nodes=all('rtept');if(nodes.some(x=>!x.hasAttribute('lat')||!x.hasAttribute('lon')))throw Error('座標が欠けています。');const points=nodes.map(x=>{const raw=x.getElementsByTagNameNS('*','ele')[0]?.textContent?.trim();return {lat:Number(x.getAttribute('lat')),lon:Number(x.getAttribute('lon')),ele:raw&&Number.isFinite(Number(raw))?Number(raw):null};});const name=all('name')[0]?.textContent?.trim()||'インポートしたコース';return {points,name};}
 $('gpx').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{if(f.size>10*1024*1024)throw Error('GPXは10MB以下にしてください。');const p=parseGPX(await f.text());loadRoute(p.points,p.name);status('GPXを読み込みました。曲がりの通知は形状からの推定です。');}catch(e){status(e.message);}finally{$('gpx').value='';}};
 $('demo').onclick=()=>{loadRoute([{lat:35.802,lon:140.132},{lat:35.807,lon:140.132},{lat:35.812,lon:140.137},{lat:35.812,lon:140.148},{lat:35.806,lon:140.153},{lat:35.8,lon:140.148},{lat:35.798,lon:140.138},{lat:35.802,lon:140.132}],'操作確認用サンプル（架空）');status('このコースは操作確認用です。実際に走れる道として検証していません。');};
 async function lockScreen(){if(!running||paused||!$('wake').checked)return;try{if('wakeLock'in navigator){wake=await navigator.wakeLock.request('screen');wake.addEventListener('release',()=>{wake=null;});}else status('このブラウザは画面点灯維持に非対応です。自動ロック設定を確認してください。');}catch{status('画面点灯を維持できません。端末の自動ロック設定を確認してください。');}}
 function releaseWake(){wake?.release().catch(()=>{});wake=null;}
-function controls(){ $('start').disabled=running;$('pause').disabled=!running;$('stop').disabled=!running;$('gpx').disabled=running;$('demo').disabled=running;$('pause').textContent=paused?'再開':'一時停止';planner?.setLocked(running);$('mode').textContent=running?(paused?'休憩':'ナビ中'):'準備';}
-function beginWatch(){previousFix=null;watch=navigator.geolocation.watchPosition(onLocation,e=>{status(({1:'位置情報の利用が許可されていません。ブラウザ設定を確認してください。',2:'現在地を取得できません。空の開けた場所でお試しください。',3:'現在地の取得に時間がかかっています。'})[e.code]||e.message);instruction('GPSを確認してください','位置情報を待っています','◎');$('speed').textContent='—';},{enableHighAccuracy:true,maximumAge:0,timeout:15000});}
-$('start').onclick=()=>{if(planner?.busy){status('経路の作成完了を待ってください。');return;}if(routeKind==='planned'&&planner?.dirty){status('地点の変更を反映するため、自転車ルートを再作成してください。');return;}if(!route.length){status('先にGPXを読み込むか、サンプルを表示してください。');return;}if(!navigator.geolocation){status('このブラウザは位置情報に対応していません。HTTPS環境で開いてください。');return;}if(!hasSession){if(track.length&&!confirm('前回の記録を置き換えて新しい走行を開始します。必要なら先に書き出してください。'))return;track=[];rideDistance=0;progress=null;}hasSession=true;running=true;paused=false;lastSpoken=-1;following=true;controls();save();lockScreen();beginWatch();instruction('GPSを取得しています','画面を表示したまま使用してください','◎');};
-$('pause').onclick=()=>{paused=!paused;if(paused){elevation?.progress(null);navigator.geolocation.clearWatch(watch);watch=null;releaseWake();instruction('休憩中','「再開」でナビと記録を続けます','Ⅱ');$('speed').textContent='—';save();}else{offSince=null;beginWatch();lockScreen();}controls();};
-$('stop').onclick=()=>{navigator.geolocation.clearWatch(watch);watch=null;running=false;paused=false;elevation?.progress(null);hasSession=false;offSince=null;releaseWake();controls();save();$('speed').textContent='—';instruction('ライドを終了しました','記録を書き出して保存できます','✓');};
+function controls(){ $('start').disabled=running;$('pause').disabled=!running;$('stop').disabled=!running;$('gpx').disabled=running;$('demo').disabled=running;$('pause').textContent=paused?'再開':'一時停止';planner?.setLocked(running);$('climb-alert').hidden=true;if(!running)setMapViewLabel();$('mode').textContent=running?(paused?'休憩':'ナビ中'):'準備';}
+function beginWatch(){previousFix=null;watch=navigator.geolocation.watchPosition(onLocation,e=>{rerouter.cancel();offRoute=false;elevation?.progress(null);$('climb-alert').hidden=true;status(({1:'位置情報の利用が許可されていません。ブラウザ設定を確認してください。',2:'現在地を取得できません。空の開けた場所でお試しください。',3:'現在地の取得に時間がかかっています。'})[e.code]||e.message);instruction('GPSを確認してください','位置情報を待っています','◎');$('speed').textContent='—';},{enableHighAccuracy:true,maximumAge:0,timeout:15000});}
+$('start').onclick=()=>{if(planner?.busy){status('経路の作成完了を待ってください。');return;}if(routeKind==='planned'&&planner?.dirty){status('地点の変更を反映するため、自転車ルートを再作成してください。');return;}if(!route.length){status('先にGPXを読み込むか、サンプルを表示してください。');return;}if(!navigator.geolocation){status('このブラウザは位置情報に対応していません。HTTPS環境で開いてください。');return;}if(!hasSession){announcedClimbs.clear();if(track.length&&!confirm('前回の記録を置き換えて新しい走行を開始します。必要なら先に書き出してください。'))return;track=[];rideDistance=0;progress=null;navigationPlan.stops.forEach(s=>s.visited=false);}hasSession=true;running=true;paused=false;offSince=null;offRoute=false;lastSpoken=-1;heading=null;headingFix=null;headUp=true;following=true;view.z=Math.max(view.z,15);controls();save();lockScreen();beginWatch();instruction('GPSを取得しています','画面を表示したまま使用してください','◎');};
+$('pause').onclick=()=>{paused=!paused;if(paused){rerouter.cancel();offSince=null;offRoute=false;elevation?.progress(null);navigator.geolocation.clearWatch(watch);watch=null;releaseWake();instruction('休憩中','「再開」でナビと記録を続けます','Ⅱ');$('speed').textContent='—';save();}else{offSince=null;beginWatch();lockScreen();}controls();draw();};
+$('stop').onclick=()=>{rerouter.cancel();offRoute=false;navigator.geolocation.clearWatch(watch);watch=null;running=false;paused=false;elevation?.progress(null);hasSession=false;offSince=null;releaseWake();controls();save();$('speed').textContent='—';instruction('ライドを終了しました','記録を書き出して保存できます','✓');draw();};
 $('wake').onchange=()=>{$('wake').checked?lockScreen():releaseWake();};
 $('voice').onchange=()=>{if($('voice').checked){if(!('speechSynthesis'in window)){status('このブラウザは音声に対応していません。');$('voice').checked=false;}else speak('音声通知を開始します。');}};
 function speak(text){if(!$('voice').checked||!('speechSynthesis'in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.lang='ja-JP';speechSynthesis.speak(u);}
-function onLocation(result){if(!running||paused)return;const c=result.coords;const p={lat:c.latitude,lon:c.longitude,time:result.timestamp,accuracy:c.accuracy,speed:c.speed};position=p;if(following){view.lat=p.lat;view.lon=p.lon;view.z=Math.max(view.z,15);}draw();if(c.accuracy>50){previousFix=null;elevation?.progress(null);instruction('GPSの精度が低下しています',`推定誤差 ±${Math.round(c.accuracy)}m。コース判定を保留`,'◎');$('speed').textContent='—';return;}
-  const previous=previousFix;if(!previous||p.time>previous.time){if(previous){const dt=(p.time-previous.time)/1000,d=distance(previous,p);if(dt>0&&dt<15&&d/dt<25&&d>Math.max(3,c.accuracy/2))rideDistance+=d;}
-    const stored=track.at(-1);if(!stored||p.time-stored.time>=4000||distance(stored,p)>=8)track.push(p);previousFix=p;
-  }
+function onLocation(result){
+  if(!running||paused)return;
+  const c=result.coords,p={lat:c.latitude,lon:c.longitude,time:result.timestamp,accuracy:c.accuracy,speed:c.speed};
+  if(position&&p.time<=position.time)return;position=p;
+  if(following){view.lat=p.lat;view.lon=p.lon;}
+  if(!Number.isFinite(c.accuracy)||c.accuracy>50){previousFix=null;headingFix=null;offSince=null;offRoute=false;rerouter.cancel();elevation?.progress(null);$('climb-alert').hidden=true;instruction('GPSの精度が低下しています',`推定誤差 ±${Math.round(c.accuracy)}m。コース判定を保留`,'◎');$('speed').textContent='—';draw();return;}
+  const nextHeading=movementHeading(headingFix,p,c.heading,c.speed);
+  if(nextHeading!==null){heading=smoothHeading(heading,nextHeading);headingFix=p;}else if(!headingFix||p.time-headingFix.time>=20000)headingFix=p;
+  const previous=previousFix;
+  if(previous){const dt=(p.time-previous.time)/1000,d=distance(previous,p);if(dt>0&&dt<15&&d/dt<25&&d>Math.max(3,c.accuracy/2))rideDistance+=d;}
+  const stored=track.at(-1);if(!stored||p.time-stored.time>=4000||distance(stored,p)>=8)track.push(p);previousFix=p;
   $('speed').textContent=c.speed!==null&&c.speed>=0?(c.speed*3.6).toFixed(1):'—';
-  const m=locate(p,route,progress,c.speed>2?c.heading:null);
-  const limit=Math.max(35,c.accuracy*1.5);
-  if(m.distance>limit){offSince??=p.time;if(p.time-offSince>=8000){instruction('コースを外れています',`コースから約${Math.round(m.distance)}m。停車して地図を確認`,'!');if(lastSpoken!==-2){speak('コースを外れています。停車して地図を確認してください。');lastSpoken=-2;}}else instruction('コースとの位置を確認中','GPSの状態を確認しています','◎');}
-  else{offSince=null;progress=m.s;const next=cues.findIndex(q=>q.s>progress+8);if(route.at(-1).s-progress<25){instruction('コース終点付近です','記録を終えるには「終了」を押してください','⚑');}
-    else if(next>=0){const q=cues[next],d=q.s-progress,dir=q.turn>0?'右':'左';instruction(`${Math.round(d)}m先、${dir}へ曲がる形状`,'GPXの形状による推定。実際の道路を優先',q.turn>0?'↱':'↰');if(d<Math.max(50,(c.speed||5)*15)&&lastSpoken!==next){speak(`およそ${Math.round(d/10)*10}メートル先、コースは${dir}へ曲がる形状です。`);lastSpoken=next;}}
-    else instruction('コースに沿って進みます','実際の標識・道路状況を優先してください','↑');}
-  elevation?.progress(m.distance<=limit?progress:null);updateMetrics();clearTimeout(saveTimer);saveTimer=setTimeout(save,500);draw();
+  const m=locate(p,route,progress,c.speed>2?heading:null),limit=Math.max(35,c.accuracy*1.5);
+  offRoute=m.distance>limit;
+  if(offRoute){
+    $('climb-alert').hidden=true;offSince??=p.time;
+    if(p.time-offSince>=8000){
+      instruction(rerouter.busy?'リルートしています':'コースを外れています',`コースから約${Math.round(m.distance)}m。新しい経路を確認`,'!');
+      if(lastSpoken!==-2){speak('コースを外れています。新しい経路を確認します。');lastSpoken=-2;}
+      if(!navigator.onLine)status('圏外のためリルートできません。元のコースを表示しています。');
+      void rerouter.consider();
+    }else instruction('コースとの位置を確認中','GPSの状態を確認しています','◎');
+  }else{
+    offSince=null;progress=m.s;visitStops(navigationPlan.stops,p,progress);
+    const next=cues.findIndex(q=>q.s>progress+8);
+    if(route.at(-1).s-progress<25)instruction('コース終点付近です','記録を終えるには「終了」を押してください','⚑');
+    else if(next>=0){const q=cues[next],d=q.s-progress,dir=q.turn>0?'右':'左';instruction(`${Math.round(d)}m先、${dir}へ曲がる形状`,'コース形状による推定。実際の道路を優先',q.turn>0?'↱':'↰');if(d<Math.max(50,(c.speed||5)*15)&&lastSpoken!==next){speak(`およそ${Math.round(d/10)*10}メートル先、コースは${dir}へ曲がる形状です。`);lastSpoken=next;}}
+    else instruction('コースに沿って進みます','実際の標識・道路状況を優先してください','↑');
+    updateClimbNotice(c.speed);
+  }
+  elevation?.progress(offRoute?null:progress);updateMetrics();clearTimeout(saveTimer);saveTimer=setTimeout(save,500);draw();
 }
-setInterval(()=>{if(running&&!paused&&position&&Date.now()-position.time>20000){elevation?.progress(null);instruction('位置情報の更新が止まっています','画面・位置情報の設定を確認してください','◎');$('speed').textContent='—';}},5000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(running&&!paused)lockScreen();draw();if(running)status('画面に戻りました。GPS更新を確認しています。中断区間は距離に加算しません。');}else{save();if('speechSynthesis'in window)speechSynthesis.cancel();}});
+setInterval(()=>{if(running&&!paused&&position&&Date.now()-position.time>20000){rerouter.cancel();offRoute=false;offSince=null;$('climb-alert').hidden=true;elevation?.progress(null);instruction('位置情報の更新が止まっています','画面・位置情報の設定を確認してください','◎');$('speed').textContent='—';}},5000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(running&&!paused)lockScreen();draw();if(running)status('画面に戻りました。GPS更新を確認しています。中断区間は距離に加算しません。');}else{rerouter.cancel();save();if('speechSynthesis'in window)speechSynthesis.cancel();}});
 $('export').onclick=()=>{if(!track.length){status('書き出せる走行記録がありません。');return;}const url=URL.createObjectURL(new Blob([toGPX(track)],{type:'application/gpx+xml'}));const a=document.createElement('a');a.href=url;a.download=`cycle-navi-${new Date().toISOString().slice(0,10)}.gpx`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
-$('delete').onclick=()=>{if(running){status('ナビを終了してから削除してください。');return;}if(!confirm('このブラウザのコースと走行記録を削除しますか？'))return;route=[];track=[];cues=[];routeName='';savedTerrain=null;elevation?.reset();planner?.clear();progress=null;rideDistance=0;hasSession=false;position=null;save();$('route-name').textContent='走りたいコースを、ここに。';$('route-meta').textContent='GPXを読み込むと、コース追従を始められます。';$('map-label').textContent='コース未設定';instruction('コースを準備しましょう','位置情報は「ナビ開始」時に使用します');updateMetrics();draw();status('保存データを削除しました。');};
+$('delete').onclick=()=>{if(running){status('ナビを終了してから削除してください。');return;}if(!confirm('このブラウザのコースと走行記録を削除しますか？'))return;rerouter.cancel();routeRevision++;route=[];track=[];cues=[];routeName='';navigationPlan={preferCycleways:true,stops:[]};clearTerrain();planner?.clear();progress=null;rideDistance=0;hasSession=false;position=null;save();$('route-name').textContent='走りたいコースを、ここに。';$('route-meta').textContent='GPXを読み込むと、コース追従を始められます。';$('map-label').textContent='コース未設定';instruction('コースを準備しましょう','位置情報は「ナビ開始」時に使用します');updateMetrics();draw();status('保存データを削除しました。');};
 $('help').onclick=()=>$('help-dialog').showModal();$('close-help').onclick=()=>$('help-dialog').close();
 function network(){ $('network').textContent=navigator.onLine?'オンライン':'オフライン';if(!navigator.onLine)status('オフライン：背景地図は利用できない場合があります。保存済みコースとGPS追従は継続します。');draw();}window.addEventListener('online',network);window.addEventListener('offline',network);
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;$('install').hidden=false;});$('install').onclick=async()=>{await installPrompt?.prompt();installPrompt=null;$('install').hidden=true;};
-// A small dependency-free north-up slippy map. Only visible tiles are fetched.
+// Heading-up map: tiles and overlays share the same rotation. Only visible tiles are fetched.
 function world(p,z=view.z){const scale=256*2**z,lat=Math.max(-85,Math.min(85,p.lat));return {x:(p.lon+180)/360*scale,y:(1-Math.log(Math.tan(radLocal(lat))+1/Math.cos(radLocal(lat)))/Math.PI)/2*scale};}
 function radLocal(x){return x*Math.PI/180;}
 function unworld(x,y){const scale=256*2**view.z;return {lon:x/scale*360-180,lat:Math.atan(Math.sinh(Math.PI*(1-2*y/scale)))*180/Math.PI};}
 function fitRoute(){if(!route.length)return;const xs=route.map(p=>p.lon),ys=route.map(p=>p.lat);view.lon=(Math.min(...xs)+Math.max(...xs))/2;view.lat=(Math.min(...ys)+Math.max(...ys))/2;view.z=17;const w=$('map').clientWidth,h=$('map').clientHeight;while(view.z>3){const a=world({lat:Math.min(...ys),lon:Math.min(...xs)}),b=world({lat:Math.max(...ys),lon:Math.max(...xs)});if(Math.abs(a.x-b.x)<w-100&&Math.abs(a.y-b.y)<h-70)break;view.z--;}following=false;draw();}
-function draw(){const el=$('map'),w=el.clientWidth,h=el.clientHeight;if(!w||!h)return;const center=world(view),left=center.x-w/2,top=center.y-h/2,n=2**view.z,visible=new Set();
-  if(navigator.onLine)for(let x=Math.floor(left/256);x<=Math.floor((left+w)/256);x++)for(let y=Math.floor(top/256);y<=Math.floor((top+h)/256);y++){if(y<0||y>=n)continue;const key=`${view.z}/${x}/${y}`;visible.add(key);let img=tileNodes.get(key);if(!img){img=new Image();img.alt='';img.src=`https://tile.openstreetmap.org/${view.z}/${((x%n)+n)%n}/${y}.png`;img.onerror=()=>{$('map-label').textContent='背景地図を取得できません（コース表示は継続）';};tileNodes.set(key,img);$('tiles').append(img);}img.style.left=`${x*256-left}px`;img.style.top=`${y*256-top}px`;}
+function mapAngle(){return running&&!paused&&following&&headUp&&Number.isFinite(heading)?heading:0;}
+function setMapViewLabel(){$('map-heading').textContent=running&&!paused&&following&&headUp?(heading===null?'進行方向を取得中':'進行方向 ↑ '+Math.round(heading)+'°'):'北が上';$('orientation').setAttribute('aria-pressed',String(headUp));}
+$('orientation').onclick=()=>{headUp=!headUp;draw();};
+function draw(){const el=$('map'),w=el.clientWidth,h=el.clientHeight;if(!w||!h)return;const angle=mapAngle(),a=angle*Math.PI/180,spanX=(Math.abs(Math.cos(a))*w+Math.abs(Math.sin(a))*h)/2,spanY=(Math.abs(Math.sin(a))*w+Math.abs(Math.cos(a))*h)/2;setMapViewLabel();$('tiles').style.transform=`rotate(${-angle}deg)`;const center=world(view),left=center.x-w/2,top=center.y-h/2,n=2**view.z,visible=new Set();
+  if(navigator.onLine)for(let x=Math.floor((center.x-spanX)/256);x<=Math.floor((center.x+spanX)/256);x++)for(let y=Math.floor((center.y-spanY)/256);y<=Math.floor((center.y+spanY)/256);y++){if(y<0||y>=n)continue;const key=`${view.z}/${x}/${y}`;visible.add(key);let img=tileNodes.get(key);if(!img){img=new Image();img.alt='';img.src=`https://tile.openstreetmap.org/${view.z}/${((x%n)+n)%n}/${y}.png`;img.onerror=()=>{$('map-label').textContent='背景地図を取得できません（コース表示は継続）';};tileNodes.set(key,img);$('tiles').append(img);}img.style.left=`${x*256-left}px`;img.style.top=`${y*256-top}px`;}
   for(const [key,img]of tileNodes)if(!visible.has(key)){img.remove();tileNodes.delete(key);}
   const canvas=$('overlay'),dpr=window.devicePixelRatio||1;canvas.width=w*dpr;canvas.height=h*dpr;const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
-  function xy(p){const q=world(p);return{x:q.x-left,y:q.y-top};}
+  function xy(p){const q=world(p),offset=rotateOffset(q.x-center.x,q.y-center.y,angle);return{x:w/2+offset.x,y:h/2+offset.y};}
   function line(points,color,width){ctx.beginPath();let prev=null;for(const p of points){const q=xy(p);if(!prev||(p.time&&p.time-prev.time>15000))ctx.moveTo(q.x,q.y);else ctx.lineTo(q.x,q.y);prev=p;}ctx.strokeStyle=color;ctx.lineWidth=width;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();}
   if(route.length){line(route,'#ffffff',9);line(route,'#21896d',5);for(const [p,label]of [[route[0],'S'],[route.at(-1),'G']]){const q=xy(p);ctx.fillStyle='#173e37';ctx.beginPath();ctx.arc(q.x,q.y,11,0,Math.PI*2);ctx.fill();ctx.fillStyle='white';ctx.font='bold 11px sans-serif';ctx.textAlign='center';ctx.fillText(label,q.x,q.y+4);}}
   for(let i=0;i<planMarkers.length;i++){const q=xy(planMarkers[i]);ctx.fillStyle='#d49b38';ctx.beginPath();ctx.arc(q.x,q.y,10,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.font='bold 10px sans-serif';ctx.textAlign='center';ctx.fillText(String(i+1),q.x,q.y+3);}
   if(terrainData&&route.length){let j=0,lastColor=null;for(let i=1;i<route.length;i++){while(j<terrainData.profile.length-1&&terrainData.profile[j+1].s<route[i].s)j++;const color=gradeColor(terrainData.profile[j].grade),a=xy(route[i-1]),b=xy(route[i]);if(color!==lastColor){if(lastColor)ctx.stroke();ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.strokeStyle=color;ctx.lineWidth=5;lastColor=color;}ctx.lineTo(b.x,b.y);}if(lastColor)ctx.stroke();}
   line(track,'#fff',6);line(track,'#4076ce',3);
-  if(position){const q=xy(position);ctx.fillStyle='#3e78dc';ctx.strokeStyle='white';ctx.lineWidth=3;ctx.beginPath();ctx.arc(q.x,q.y,9,0,Math.PI*2);ctx.fill();ctx.stroke();}
+  if(position){const q=xy(position);ctx.fillStyle='#3e78dc';ctx.strokeStyle='white';ctx.lineWidth=3;ctx.beginPath();ctx.arc(q.x,q.y,9,0,Math.PI*2);ctx.fill();ctx.stroke();if(Number.isFinite(heading)){ctx.save();ctx.translate(q.x,q.y);ctx.rotate((heading-angle)*Math.PI/180);ctx.beginPath();ctx.moveTo(0,-19);ctx.lineTo(-7,-7);ctx.lineTo(7,-7);ctx.closePath();ctx.fillStyle='#3e78dc';ctx.fill();ctx.restore();}}
 }
 $('zoom-in').onclick=()=>{view.z=Math.min(18,view.z+1);draw();};$('zoom-out').onclick=()=>{view.z=Math.max(3,view.z-1);draw();};$('fit').onclick=fitRoute;$('follow').onclick=()=>{following=true;if(position){view.lat=position.lat;view.lon=position.lon;view.z=15;draw();}else status('ナビ開始後に現在地を追従します。');};
-let drag=null;const map=$('map');map.addEventListener('pointerdown',e=>{if(e.target.closest('button,a'))return;map.setPointerCapture(e.pointerId);drag={x:e.clientX,y:e.clientY,center:world(view)};following=false;});map.addEventListener('pointermove',e=>{if(!drag)return;const p=unworld(drag.center.x-(e.clientX-drag.x),drag.center.y-(e.clientY-drag.y));view.lat=Math.max(-84,Math.min(84,p.lat));view.lon=((p.lon+540)%360)-180;draw();});for(const event of ['pointerup','pointercancel'])map.addEventListener(event,()=>drag=null);map.addEventListener('wheel',e=>{e.preventDefault();view.z=Math.max(3,Math.min(18,view.z+(e.deltaY<0?1:-1)));draw();},{passive:false});new ResizeObserver(draw).observe(map);
+let drag=null;const map=$('map');map.addEventListener('pointerdown',e=>{if(e.target.closest('button,a'))return;map.setPointerCapture(e.pointerId);following=false;draw();drag={x:e.clientX,y:e.clientY,center:world(view),angle:mapAngle()};});map.addEventListener('pointermove',e=>{if(!drag)return;const delta=rotateOffset(e.clientX-drag.x,e.clientY-drag.y,-drag.angle),p=unworld(drag.center.x-delta.x,drag.center.y-delta.y);view.lat=Math.max(-84,Math.min(84,p.lat));view.lon=((p.lon+540)%360)-180;draw();});for(const event of ['pointerup','pointercancel'])map.addEventListener(event,()=>drag=null);map.addEventListener('wheel',e=>{e.preventDefault();view.z=Math.max(3,Math.min(18,view.z+(e.deltaY<0?1:-1)));draw();},{passive:false});new ResizeObserver(draw).observe(map);
+const rerouter=createRerouter({request:requestRoute,getState:()=>({active:running&&!paused&&$('auto-reroute').checked&&document.visibilityState==='visible'&&!!position&&Date.now()-position.time<20000,online:navigator.onLine,offRoute,offFor:offSince===null?0:Date.now()-offSince,point:position,route,progress,plan:navigationPlan,heading,revision:routeRevision}),apply:applyReroute,report:message=>{status(message);$('reroute-status').textContent=message;}});
+$('auto-reroute').onchange=()=>{rerouter.cancel();offSince=null;status($('auto-reroute').checked?'自動リルートを有効にしました。':'自動リルートを停止しました。元のコースを表示します。');};
 if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>status('オフライン起動の準備に失敗しました。HTTPS環境で再度開いてください。'));
-await restore();elevation=mountElevation({getRoute:()=>route,onChange:data=>{terrainData=data;draw();},onInspect:p=>{following=false;view.lat=p.lat;view.lon=p.lon;view.z=Math.max(view.z,14);draw();},onPersist:data=>{savedTerrain=data;save();}});elevation.reset(savedTerrain);planner=mountPlanner({loadRoute,getRoute:()=>route,onMarkers:points=>{planMarkers=points;draw();},status});network();controls();draw();
+await restore();elevation=mountElevation({getRoute:()=>route,onChange:data=>{terrainData=data;draw();},onInspect:p=>{following=false;view.lat=p.lat;view.lon=p.lon;view.z=Math.max(view.z,14);draw();},onPersist:data=>{savedTerrain=data;save();}});elevation.reset(savedTerrain);planner=mountPlanner({loadRoute,getRoute:()=>route,onMarkers:points=>{planMarkers=points;draw();},status});network();controls();draw();if(route.length&&!savedTerrain)$('refresh-elevation').click();

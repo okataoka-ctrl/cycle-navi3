@@ -21,8 +21,15 @@ export function analyzeTerrain(samples){
   const window=Math.max(200,spacing*2);
   for(const p of profile){const a=interpolate(profile,p.s-window/2),b=interpolate(profile,p.s+window/2);p.grade=(b.ele-a.ele)/(b.s-a.s||1)*100;}
   let ascent=0,descent=0,anchor=profile[0].ele;for(const p of profile){const d=p.ele-anchor;if(Math.abs(d)>=3){if(d>0)ascent+=d;else descent-=d;anchor=p.ele;}}
-  const climbs=[];let begin=null;
-  function finish(end){if(begin===null)return;const a=profile[begin],b=profile[end],length=b.s-a.s,gain=b.ele-a.ele;if(length>=300&&gain>=15)climbs.push({start:a.s,end:b.s,length,gain,average:gain/length*100,max:Math.max(...profile.slice(begin,end+1).map(p=>p.grade)),point:a});begin=null;}
-  for(let i=0;i<profile.length;i++){if(profile[i].grade>=2){if(begin===null)begin=Math.max(0,i-1);}else if(begin!==null)finish(i);}if(begin!==null)finish(profile.length-1);
+  const climbs=[];let begin=0,peak=0;
+  function finish(end){const a=profile[begin],b=profile[end],length=b.s-a.s,rise=b.ele-a.ele;let gain=0,reference=a.ele;for(const q of profile.slice(begin+1,end+1)){const d=q.ele-reference;if(Math.abs(d)>=3){if(d>0)gain+=d;reference=q.ele;}}if(b.ele>reference)gain+=b.ele-reference;
+    if(length>=300&&gain>=15&&rise>0)climbs.push({start:a.s,end:b.s,length,gain,rise,average:rise/length*100,max:Math.max(...profile.slice(begin,end+1).map(p=>p.grade)),point:a});}
+  for(let i=1;i<profile.length;i++){
+    if(profile[i].ele>profile[peak].ele+0.2)peak=i;
+    if(profile[i].ele<profile[begin].ele&&peak===begin){begin=i;peak=i;continue;}
+    const drop=profile[peak].ele-profile[i].ele,flat=profile[i].s-profile[peak].s;
+    if(drop>=8||flat>=300){finish(peak);begin=i;peak=i;}
+  }
+  finish(peak);
   return {profile,ascent,descent,climbs,maxGrade:Math.max(0,...profile.map(p=>p.grade)),window,spacing};
 }

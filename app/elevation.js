@@ -32,8 +32,8 @@ export function mountElevation({getRoute,onChange,onInspect,onPersist}){
     try{const samples=sampleRoute(route);const fromGPX=route.every(p=>Number.isFinite(p.ele));if(!fromGPX){for(let i=0;i<samples.length;i+=100){const part=samples.slice(i,i+100),data=await jsonRequest(elevationURL(part));if(currentVersion!==version)return;if(!Array.isArray(data.elevation)||data.elevation.length!==part.length||data.elevation.some(e=>!Number.isFinite(e)))throw Error('標高データが欠けています。');part.forEach((p,j)=>p.ele=data.elevation[j]);$('elevation-status').textContent=`標高取得 ${Math.min(i+100,samples.length)} / ${samples.length}点`;}}
       if(currentVersion!==version)return;terrain=analyzeTerrain(samples);source=fromGPX?'GPX標高':'Open-Meteo / Copernicus DEM';selected=0;$('terrain-position').max=String(Math.ceil(samples.at(-1).s));$('terrain-position').value='0';$('terrain-position').disabled=false;
       $('elevation-status').textContent=`${source} · ${samples.length}点・約${Math.round(terrain.spacing)}m間隔で解析。勾配は約${Math.round(terrain.window)}m区間から推定。`;
-      render();onChange(terrain);onPersist({terrain,source});
-    }catch(e){if(currentVersion===version){$('elevation-status').textContent=`標高を取得できませんでした。${e.message}${terrain?' 以前の解析を表示しています。':''}`;}}finally{busy=false;$('refresh-elevation').disabled=false;}
+      render();onChange(terrain);onPersist({terrain,source,analysisVersion:4});
+    }catch(e){if(currentVersion===version){$('elevation-status').textContent=`標高を取得できませんでした。${e.message}${terrain?' 以前の解析を表示しています。':''}`;}}finally{busy=false;$('refresh-elevation').disabled=false;if(currentVersion!==version&&getRoute().length)$('refresh-elevation').click();}
   };
   return {reset(saved=null){version++;terrain=saved?.terrain||null;source=saved?.source||'';selected=0;progress=null;$('terrain-position').disabled=!terrain;if(terrain){$('terrain-position').max=String(Math.ceil(terrain.profile.at(-1).s));$('elevation-status').textContent=`保存済みの${source}。約${Math.round(terrain.window)}m区間の勾配推定。`;}else $('elevation-status').textContent='標高を取得すると、地図とグラフを勾配で色分けします。';render();onChange(terrain);},progress(s){progress=s;updateNumbers();if(terrain)chart();}};
 }

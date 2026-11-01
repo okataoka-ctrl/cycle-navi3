@@ -22,3 +22,11 @@ test('elevation request limits points and gradient colors preserve signs',()=>{
   assert.throws(()=>elevationURL(Array.from({length:101},()=>({lat:35,lon:140}))));
   const u=new URL(elevationURL([{lat:35,lon:140}]));assert.equal(u.searchParams.get('latitude'),'35.00000');assert.equal(gradeColor(-5),'#4485c6');assert.equal(gradeColor(9),'#ce5b4e');
 });
+test('long gentle climbs are detected even below two percent',()=>{
+  const samples=Array.from({length:61},(_,i)=>({lat:35+i/10000,lon:140,s:i*100,ele:i}));
+  const t=analyzeTerrain(samples);assert.equal(t.climbs.length,1);assert.ok(t.climbs[0].gain>=50);assert.ok(t.climbs[0].average<2);
+});
+test('a small descending interruption is kept inside one climb',()=>{
+  const samples=Array.from({length:30},(_,i)=>({lat:35+i/10000,lon:140,s:i*100,ele:i<=15?i*5:i===16?72:72+(i-16)*5}));
+  const t=analyzeTerrain(samples);assert.equal(t.climbs.length,1);assert.ok(t.climbs[0].gain>=100);
+});
