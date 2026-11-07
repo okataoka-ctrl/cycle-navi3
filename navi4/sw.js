@@ -1,6 +1,6 @@
 const PREFIX='navi4:'+self.registration.scope+':';
-const CACHE=PREFIX+'v1';
-const ASSETS=['./','./index.html','./style.css','./app.js','./nav.js','./planner.js','./services.js','./terrain.js','./elevation.js','./navigation.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png'];
+const CACHE=PREFIX+'v2';
+const ASSETS=['./','./index.html','./style.css','./app.js','./nav.js','./planner.js','./services.js','./terrain.js','./elevation.js','./navigation.js','./viewport.js','./wind.js','./manifest.webmanifest','./icons/icon-192.png','./icons/icon-512.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS.map(p=>new Request(new URL(p,self.registration.scope),{cache:'reload'}))))));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith(PREFIX)&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
@@ -14,3 +14,6 @@ self.addEventListener('fetch',event=>{
     return saved||fetch(event.request);
   }));
 });
+
+
+self.addEventListener('message',event=>{if(event.data?.type==='SKIP_WAITING')self.skipWaiting();});

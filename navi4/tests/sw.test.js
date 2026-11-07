@@ -20,6 +20,7 @@ test('map tiles are not intercepted or cached by the service worker',()=>{
 });
 test('activation removes only old caches from this app scope',async()=>{
   const removed=[];let waiting;const prefix='navi4:'+scope+':';
-  const listeners=worker({caches:{keys:async()=>[prefix+'v3',prefix+'v1','cycle-navi:https://example.test/other/:v3'],delete:async key=>removed.push(key)}});
+  const listeners=worker({caches:{keys:async()=>[prefix+'v3',prefix+'v2','cycle-navi:https://example.test/other/:v3'],delete:async key=>removed.push(key)}});
   listeners.activate({waitUntil:p=>waiting=p});await waiting;assert.deepEqual(removed,[prefix+'v3']);
 });
+
